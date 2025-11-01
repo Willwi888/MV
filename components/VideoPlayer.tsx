@@ -23,7 +23,7 @@ interface VideoPlayerProps {
   videoUrl: string | null;
   onBack: () => void;
   songTitle: string;
-  artistName: string;
+  artistName:string;
 }
 
 type LyricAlignment = 'items-start text-left' | 'items-center text-center' | 'items-end text-right';
@@ -48,14 +48,15 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const playerContainerRef = useRef<HTMLDivElement>(null);
 
   const [colorPalette, setColorPalette] = useState<ColorPalette>(lyricColorPalettes[0]);
-  const [fontSize, setFontSize] = useState(2.5); // Using rem units, adjusted for new layout
+  const [fontSize, setFontSize] = useState(2.5);
   const [alignment, setAlignment] = useState<LyricAlignment>('items-center text-center');
   const [effect, setEffect] = useState<VisualEffect>('subtle-pan');
   const [showControls, setShowControls] = useState(true);
-  const [lyricStyle, setLyricStyle] = useState<LyricStyle>('vertical'); // Default to new style
+  const [lyricStyle, setLyricStyle] = useState<LyricStyle>('vertical');
   const [isExporting, setIsExporting] = useState(false);
   const [inExportMode, setInExportMode] = useState(false);
-  
+  const [countdown, setCountdown] = useState<number | null>(null);
+
   const activeLyricIndex = timedLyrics.findIndex(
     lyric => currentTime >= lyric.startTime && currentTime < lyric.endTime
   );
@@ -66,7 +67,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
     const handleTimeUpdate = () => setCurrentTime(audio.currentTime);
     const handleLoadedMetadata = () => setDuration(audio.duration);
-    const handleEnded = () => setIsPlaying(false);
+    const handleEnded = () => {
+        setIsPlaying(false);
+        if (inExportMode && document.fullscreenElement) {
+            document.exitFullscreen();
+        }
+    };
 
     audio.addEventListener('timeupdate', handleTimeUpdate);
     audio.addEventListener('loadedmetadata', handleLoadedMetadata);
@@ -77,18 +83,49 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
       audio.removeEventListener('ended', handleEnded);
     };
-  }, []);
-  
+  }, [inExportMode]);
+
   useEffect(() => {
     const handleFullscreenChange = () => {
-        if (!document.fullscreenElement) {
+        if (document.fullscreenElement === playerContainerRef.current) {
+            // Entered fullscreen for export
+            setInExportMode(true);
+            setIsExporting(false); // Close modal
+            
+            if (audioRef.current) {
+                audioRef.current.pause();
+                audioRef.current.currentTime = 0;
+                setCurrentTime(0);
+                setIsPlaying(false);
+            }
+            
+            let count = 5;
+            setCountdown(count);
+            
+            const countdownInterval = setInterval(() => {
+                count -= 1;
+                if (count > 0) {
+                    setCountdown(count);
+                } else {
+                    clearInterval(countdownInterval);
+                    setCountdown(null);
+                    handlePlayPause(); 
+                }
+            }, 1000);
+        } else {
+            // Exited fullscreen
             setInExportMode(false);
-            setShowControls(true);
+            setCountdown(null);
+            if (audioRef.current && !audioRef.current.paused) {
+                audioRef.current.pause();
+                setIsPlaying(false);
+            }
         }
     };
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
+
 
   useEffect(() => {
     // Sync video playback with audio
@@ -131,9 +168,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         playerContainerRef.current.requestFullscreen().catch(err => {
             alert(`無法進入全螢幕模式: ${err.message}`);
         });
-        setInExportMode(true);
-        setIsExporting(false);
-        setShowControls(false); // Force hide controls
     }
   };
 
@@ -259,7 +293,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const backgroundImageUrl = imageUrls[currentImageIndex] || '';
 
   return (
-    <div ref={playerContainerRef} className="w-screen h-screen bg-black flex flex-col items-center justify-center overflow-hidden relative font-sans">
+    <div ref={playerContainerRef} className={`w-screen h-screen bg-black flex flex-col items-center justify-center overflow-hidden relative font-sans ${inExportMode && countdown === null ? 'cursor-none' : ''}`}>
       {/* Background */}
       <div className="absolute inset-0 w-full h-full">
         {videoUrl ? (
@@ -285,30 +319,36 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       {isExporting && (
           <div className="fixed inset-0 bg-gray-900 bg-opacity-90 backdrop-blur-lg flex flex-col items-center justify-center z-50 text-white p-4">
               <div className="w-full max-w-lg text-center bg-gray-800/50 p-8 rounded-xl border border-gray-700">
-                  <h2 className="text-2xl font-bold mb-2">特務趕工中... (螢幕錄製)</h2>
-                  <p className="text-gray-400 mb-6">我們將進入全螢幕播放，請準備使用您電腦的螢幕錄影功能。</p>
+                  <h2 className="text-2xl font-bold mb-2">手工打包 MV (螢幕錄製)</h2>
+                  <p className="text-gray-400 mb-6">我們將引導您完成螢幕錄製，請跟隨以下步驟。</p>
                   <div className="text-left space-y-3 text-gray-300 bg-gray-900/50 p-4 rounded-md">
-                      <p>1. 點擊下方按鈕，MV 將會全螢幕播放並隱藏所有控制項。</p>
-                      <p>2. 開啟您電腦的螢幕錄製功能 (e.g. <kbd className="px-2 py-1 text-xs font-semibold text-gray-800 bg-gray-100 border border-gray-200 rounded-lg">Win + G</kbd> 或 <kbd className="px-2 py-1 text-xs font-semibold text-gray-800 bg-gray-100 border border-gray-200 rounded-lg">Cmd+Shift+5</kbd>)。</p>
-                      <p>3. 點擊播放按鈕，讓 MV 完整播放一次。</p>
-                      <p>4. 播放結束後，停止錄製，即可儲存您的 MV 影片！</p>
+                      <p>1. 點擊下方按鈕，我們將進入全螢幕模式。</p>
+                      <p>2. 螢幕變黑後，您有 <strong className="text-cyan-300">5 秒</strong> 時間開啟您電腦的錄製功能 (e.g. <kbd>Win+G</kbd> 或 <kbd>Cmd+Shift+5</kbd>)。</p>
+                      <p>3. 倒數結束後，MV 將 <strong className="text-cyan-300">自動從頭播放</strong>。</p>
+                      <p>4. 播放完畢會 <strong className="text-cyan-300">自動退出全螢幕</strong>。此時即可停止錄製並儲存影片！</p>
                   </div>
                   <div className="mt-8 flex justify-center gap-4">
                       <button onClick={() => setIsExporting(false)} className="px-6 py-2 text-sm font-semibold text-gray-300 bg-gray-700/50 hover:bg-gray-600/50 border border-gray-600 rounded-lg transition-colors">
                           取消
                       </button>
                       <button onClick={handleEnterExportMode} className="px-6 py-2 text-sm font-bold text-gray-900 bg-[#a6a6a6] hover:bg-[#999999] rounded-lg transition-colors">
-                          進入全螢幕錄製模式
+                          準備錄製
                       </button>
                   </div>
               </div>
           </div>
       )}
+      
+      {/* Countdown Overlay */}
+      {inExportMode && countdown !== null && (
+        <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center z-40 text-white">
+            <p className="text-2xl mb-4">準備開始錄影...</p>
+            <p className="text-9xl font-bold" style={{ animation: 'ping 1s cubic-bezier(0, 0, 0.2, 1) infinite' }}>{countdown}</p>
+        </div>
+      )}
 
-      {/* Overlay Content */}
-      <div className={`relative z-10 w-full h-full flex flex-col p-4 sm:p-8 transition-opacity duration-300 ${!inExportMode && (showControls ? 'opacity-100' : 'opacity-0 hover:opacity-100 focus-within:opacity-100')}`}>
-        {/* Header */}
-        {!inExportMode && (
+      {/* Main UI Overlay */}
+      <div className={`relative z-10 w-full h-full flex flex-col p-4 sm:p-8 transition-opacity duration-300 ${inExportMode ? 'opacity-0 pointer-events-none' : (showControls ? 'opacity-100' : 'opacity-0 hover:opacity-100 focus-within:opacity-100')}`}>
         <header className="flex-shrink-0 flex items-center justify-between w-full">
           <button onClick={onBack} className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-black/30 hover:bg-black/50 border border-white/20 rounded-lg transition-colors">
             <PrevIcon className="w-5 h-5" />
@@ -327,17 +367,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
              )}
           </div>
         </header>
-        )}
         
         {/* Lyrics Container */}
         <div className="flex-grow flex items-center justify-center overflow-hidden">
             {lyricStyle === 'vertical' ? (
               <div className="w-full max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-16 items-center px-4 h-full">
-                  {/* Left Column (Lyrics) */}
                   <div className={`flex flex-col h-full justify-center ${alignment}`}>
                       {renderLyrics()}
                   </div>
-                  {/* Right Column (Info) */}
                   <div className="hidden md:flex flex-col items-center text-center">
                       {imageUrls[0] && (
                           <img 
@@ -364,8 +401,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         </div>
 
         {/* Controls */}
-        <footer className={`flex-shrink-0 space-y-4 ${inExportMode ? 'hidden' : ''}`}>
-            {/* Timeline */}
+        <footer className="flex-shrink-0 space-y-4">
             <div className="flex items-center gap-3">
                 <span className="text-sm text-gray-300 font-mono w-12 text-center">{formatTime(currentTime)}</span>
                 <input
@@ -379,10 +415,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 />
                 <span className="text-sm text-gray-300 font-mono w-12 text-center">{formatTime(duration)}</span>
             </div>
-
-            {/* Buttons & Settings */}
             <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-                {/* Left Settings */}
                 <div className="flex items-center gap-2 p-1.5 bg-black/30 rounded-full border border-white/10">
                     <button onClick={() => setLyricStyle('karaoke')} title="卡拉OK" className={`p-2 rounded-full transition-colors ${lyricStyle === 'karaoke' ? 'bg-white/20 text-white' : 'text-gray-300 hover:bg-white/10'}`}> <AlignLeftIcon className="w-5 h-5" /></button>
                     <button onClick={() => setLyricStyle('vertical')} title="垂直滾動" className={`p-2 rounded-full transition-colors ${lyricStyle === 'vertical' ? 'bg-white/20 text-white' : 'text-gray-300 hover:bg-white/10'}`}> <VerticalLayoutIcon className="w-5 h-5" /></button>
@@ -393,13 +426,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                         <button key={p.name} title={p.name} onClick={() => setColorPalette(p)} className={`w-6 h-6 rounded-full transition-transform hover:scale-110 ${colorPalette.name === p.name ? 'ring-2 ring-white ring-offset-2 ring-offset-black/50' : ''}`} style={{background: p.bg}} />
                     ))}
                 </div>
-
-                {/* Play Button */}
                 <button onClick={handlePlayPause} className="bg-white text-black rounded-full p-4 transform hover:scale-110 transition-transform shadow-lg">
                     {isPlaying ? <PauseIcon className="w-7 h-7" /> : <PlayIcon className="w-7 h-7" />}
                 </button>
-
-                {/* Right Settings */}
                 <div className="flex items-center justify-end gap-2 p-1.5 bg-black/30 rounded-full border border-white/10">
                     <button onClick={() => setAlignment('items-start text-left')} title="靠左" className={`p-2 rounded-full transition-colors ${alignment.includes('left') ? 'bg-white/20 text-white' : 'text-gray-300 hover:bg-white/10'}`}> <AlignLeftIcon className="w-5 h-5" /></button>
                     <button onClick={() => setAlignment('items-center text-center')} title="置中" className={`p-2 rounded-full transition-colors ${alignment.includes('center') ? 'bg-white/20 text-white' : 'text-gray-300 hover:bg-white/10'}`}> <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" /></svg></button>
